@@ -215,24 +215,249 @@ model_task <- glmer(Duration ~ Task + StartTime_scaled + (1|ParticipantID), fami
 summary(model_time)
 summary(model_task)
 
+# Comparing models
 anova(model_task, model_time) 
+
+# calculating R-squared
+r.squaredGLMM(model_time)
+r.squaredGLMM(model_task)
+```
+
+
+# Cross validation, VS fixations
+```{r}
+p_load(cvms, groupdata2, Metrics, RTextTools, purrr, caret)
+
+data <- fold(fixations_vs, k = 5, id_col = 'ParticipantID') %>% 
+  arrange(.folds)
+
+# To specify models
+fixation_models <- (c("Duration ~ Task + StartTime_scaled + (1 | ParticipantID)", "Duration ~ Item + StartTimeS + (1 | ParticipantID)"))
+  
+# To crossvalidate
+CV_fix <- cross_validate(data, 
+                         fixation_models, 
+                         folds_col = '.folds',
+                         family = 'gaussian',
+                         REML = FALSE)
+CV_fix
+
+#Get the rmse of the full model's predictions
+rmse(fixations_vs$Duration, predict(model_time))
+rmse(fixations_vs$Duration, predict(model_task))
+
+#Evaluate RMSE
+sd(fixations_vs$Duration)
+
+#The model performs worse than actually taking the average. 
+#Very close when cross-validated though, but RMSE should be smaller than SD in a good model. 
 
 ```
 
 
 ### Visual Search, Saccades
-```{r}  
+```{r}   
 sac_model_vs <- glmer(Amplitude ~ Task * StartTime + (1 + Task|Item) + (1 + Task|ParticipantID), family = gaussian(link = log), saccades_vs, REML = F)
 
-summary(sac_model_vs)
+summary(sac_model_vs) 
 ```
 
 
+# Plots
+```{r wow all gathered}
+fixations_vs %>% 
+  ggplot() +
+  aes(x = StartTime, color = Task, y = Duration ) +
+  geom_smooth(method = "lm") 
+
+fixations_vs %>% 
+  ggplot() +
+  aes(x = StartTime, color = Item, y = Duration ) +
+  geom_smooth(method = "lm", se = F) + facet_wrap(~Task)
+
+fixations_vs %>% filter(Year == "2018")%>%
+  ggplot() +
+  aes(x = StartTime, color = Item, y = Duration ) +
+  geom_smooth(method = "lm", se = F) + facet_wrap(~Task)
+
+fixations_vs %>% filter(Year == "2019")%>%
+  ggplot() +
+  aes(x = StartTime, color = Item, y = Duration ) +
+  geom_smooth(method = "lm", se = F) + facet_wrap(~Task)
+
+ggplot(fixations_vs, aes(x=Task, y=Duration, color=Task)) + 
+  geom_violin() +
+  ylim(0, 5000) +
+  labs(title ='Distribution of Duration of Fixations Acording to Task')
+
+saccades_vs %>% 
+  ggplot() +
+  aes(x = StartTime, color = Task, y = Amplitude ) +
+  geom_smooth(method = "lm") 
+
+saccades_vs %>% 
+  ggplot() +
+  aes(x = StartTime, color = Item, y = Amplitude ) +
+  geom_smooth(method = "auto", se = F) + 
+  facet_wrap(~Task)
+
+ggplot(saccades_vs, aes(x=Task, y=Duration, color=Task)) + 
+  geom_violin() +
+  ylim(0, 5000) +
+  labs(title ='Distribution of Duration of Fixations Acording to Task')
+```
+
+```{r Heatmap count}
+## these colors work well for heatmaps (see https://gist.github.com/kalebr/6832380) 
+jet.colors <- colorRampPalette(c("#00007F", "blue", "#007FFF",
+                                 "cyan", "#7FFF7F", "yellow", "#FF7F00", "red", "#7F0000"))
+
+z = subset(fixations_vs, ParticipantID ==	'2019-2_2_f22' & Item == 'fjord.jpg')
+
+#Just heatmap
+ggplot(z, aes(x = PositionX, y = 1081-PositionY)) +
+  stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))),
+                 contour=F, n=1000) + 
+  scale_alpha(range = c(0.1, 0.6)) +
+  scale_fill_gradientn(colours = jet.colors(10), trans="sqrt") + 
+  # facet_wrap(~Trial) +
+  ## the following lines are for aesthetic purposes only
+  xlim(0,1920) + ylim(0,1080) +
+  ggtitle('Heatmap for visual search task') +
+  theme_bw() + theme(legend.position = 'none')
+
+### HEATMAP W/IMAGE
+img <- jpeg::readJPEG('Pics/VisualSearch/fjord.jpg')
+img <- grid::rasterGrob(img, interpolate=TRUE)
+
+#FINAL PLOT
+ggplot(z, aes(x = PositionX, y = 1081-PositionY)) +
+  annotation_custom(img, xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf) +
+  stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), # alpha part: the vibrance of the colours are more intense when squarerooted!
+                 contour=FALSE, n=1000) + 
+  scale_alpha(range = c(0.1, 0.6)) +
+  scale_fill_gradientn(colours = jet.colors(10), trans="sqrt") +
+  # facet_wrap(~Trial) +
+  ## the following lines are for aesthetic purposes only
+  xlim(0,1920) + ylim(0,1080) +
+  ggtitle('Heatmap for visual search task (count)') +
+  theme_bw() + theme(legend.position = 'none')
+
+```
+
+```{r Scanpath count}
+fixations_vs %>% filter(ParticipantID == "2019-2_2_f22"& Item == 'fjord.jpg')
+#COUNT task
+
+# Ploting scan path
+x = subset(fixations_vs, ParticipantID ==	'2019-2_2_f22' & Item == 'fjord.jpg')
+
+img <- jpeg::readJPEG('Pics/VisualSearch/fjord.jpg')
+img <- grid::rasterGrob(img, interpolate=TRUE)
+
+#Scanpath w/image
+ggplot(x, aes(x = PositionX, y = 1081-PositionY)) +
+  annotation_custom(img, xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf) +
+  geom_rect(xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf, fill = 'white', alpha = .02) +
+  geom_path(alpha = .6, color = 'red') +
+  geom_point(size = x$Duration*20,  color = '#6291D6', stroke = 1, shape = 21) +
+  ggrepel::geom_text_repel(aes(label = Fixation), size = 3, color = 'blue') +
+  xlim(0,1920) + ylim(0,1080) +
+  ggtitle('Scanpath for visual search task') +
+  theme_bw() + theme(legend.position = 'none')
+
+#Scanpath w/o image
+ggplot(x, aes(x = PositionX, y = 1081-PositionY)) +
+  geom_path(alpha = .6, color = '#F0B952') +
+  geom_point(size = x$Duration*20, alpha = .6, color = '#6291D6', stroke = 1, shape = 21) +
+  ggrepel::geom_text_repel(aes(label = Fixation), size = 3, color = 'black') +
+  # facet_wrap(~Trial) +
+  ## the following lines are for aesthetic purposes only
+  xlim(0,1920) + ylim(0,1080) +
+  ggtitle('Scanpath for visual search task') +
+  theme_bw() + theme(legend.position = 'none')
+```
+
+```{r Heatmap star}
+fixations_vs %>% filter(ParticipantID == "2019-2_2_f22"& Item == 'fjord.jpg')
+#COUNT
+
+fixations_vs %>% filter(Item == 'fjord.jpg' & Task == 'VisualSearch_Star')
+#2019-1_1_m11
+
+
+## these colors work well for heatmaps (see https://gist.github.com/kalebr/6832380)
+jet.colors <- colorRampPalette(c("#00007F", "blue", "#007FFF",
+                                 "cyan", "#7FFF7F", "yellow", "#FF7F00", "red", "#7F0000"))
+
+z = subset(fixations_vs, ParticipantID ==	'2019-1_1_m11' & Item == 'fjord.jpg')
+
+#Just heatmap
+ggplot(z, aes(x = PositionX, y = 1081-PositionY)) +
+  stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))),
+                 contour=F, n=1000) + 
+  scale_alpha(range = c(0.1, 0.6)) +
+  scale_fill_gradientn(colours = jet.colors(10), trans="sqrt") + 
+  # facet_wrap(~Trial) +
+  ## the following lines are for aesthetic purposes only
+  xlim(0,1920) + ylim(0,1080) +
+  ggtitle('Heatmap for visual search task') +
+  theme_bw() + theme(legend.position = 'none')
+
+### HEATMAP W/IMAGE
+img <- jpeg::readJPEG('Pics/VisualSearch/fjord.jpg')
+img <- grid::rasterGrob(img, interpolate=TRUE)
+
+#FINAL PLOT
+ggplot(z, aes(x = PositionX, y = 1081-PositionY)) +
+  annotation_custom(img, xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf) +
+  stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), # alpha part: the vibrance of the colours are more intense when squarerooted!
+                 contour=FALSE, n=1000) + 
+  scale_alpha(range = c(0.1, 0.6)) +
+  scale_fill_gradientn(colours = jet.colors(10), trans="sqrt") +
+  # facet_wrap(~Trial) +
+  ## the following lines are for aesthetic purposes only
+  xlim(0,1920) + ylim(0,1080) + 
+  ggtitle('Heatmap for visual search task (star)') +
+  theme_bw() + theme(legend.position = 'none')
+```
+
+```{r Scanpath star}
+fixations_vs %>% filter(ParticipantID == "2019-1_1_m11"& Item == 'fjord.jpg')
+#COUNT task
+
+# Ploting scan path
+x = subset(fixations_vs, ParticipantID ==	'2019-1_1_m11' & Item == 'fjord.jpg')
+
+img <- jpeg::readJPEG('Pics/VisualSearch/fjord.jpg')
+img <- grid::rasterGrob(img, interpolate=TRUE)
+
+#Scanpath w/image
+ggplot(x, aes(x = PositionX, y = 1081-PositionY)) +
+  annotation_custom(img, xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf) +
+  geom_rect(xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf, fill = 'white', alpha = .02) +
+  geom_path(alpha = .6, color = 'red') +
+  geom_point(size = x$Duration*20,  color = '#6291D6', stroke = 1, shape = 21) +
+  ggrepel::geom_text_repel(aes(label = Fixation), size = 3, color = 'blue') +
+  xlim(0,1920) + ylim(0,1080) +
+  ggtitle('Scanpath for visual search task') +
+  theme_bw() + theme(legend.position = 'none')
+
+#Scanpath w/o image
+ggplot(x, aes(x = PositionX, y = 1081-PositionY)) +
+  geom_path(alpha = .6, color = '#F0B952') +
+  geom_point(size = x$Duration*20, alpha = .6, color = '#6291D6', stroke = 1, shape = 21) +
+  ggrepel::geom_text_repel(aes(label = Fixation), size = 3, color = 'black') +
+  # facet_wrap(~Trial) +
+  ## the following lines are for aesthetic purposes only
+  xlim(0,1920) + ylim(0,1080) +
+  ggtitle('Scanpath for visual search task') +
+  theme_bw() + theme(legend.position = 'none')
+```
 
 
 SOCIAL ENGANGEMENT
 ---
-
 
 
 
@@ -308,7 +533,19 @@ geom_smooth() + facet_wrap(~ParticipantGender)
 ``` 
 
 
+OSTENSION / FIXATION PLOT ACCORDING TO GENDER
+```{r}
+fixations_se %>% 
+  group_by(ParticipantGender, gender, position, ostension) %>% 
+  summarise(PupilMean = mean(PupilSize)) -> puppy
 
+puppy %>% 
+  ggplot() +
+  aes(x = ParticipantGender, y = PupilMean, color = gender) +
+  geom_line(aes(group = gender)) +
+  geom_point() + facet_grid( ostension ~ position)
+
+```
 
 
 
