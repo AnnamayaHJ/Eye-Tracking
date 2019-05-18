@@ -1,0 +1,317 @@
+---
+title: "CogSci Eye-tracking Workshop 2019 - Day 5"
+author: "Fabio Trecca"
+date: "12/2/2019"
+output:
+  html_document:
+#    theme: paper
+    highlight: zenburn
+---
+
+```{r libraries}
+library(tidyverse)
+install.packages("lme4")
+library(lme4)
+library(pacman)
+p_load(desc, BBmisc)
+#detach(package:plyr)
+#library(dplyr)
+```
+
+DATA LOADING AND CLEANING
+---
+
+### Load data
+```{r load data}
+## Set working directory to the relevant one on your computer
+setwd(getwd())
+
+Fixations <- read_csv('fixations2018_2019_5.csv')
+Saccades <- read_csv('saccades2018_2019_5.csv')
+
+logfiles <- read_csv('logfilesSE_5.csv') #use str_split to extract e.g. -o +o (ostension) from the video title
+extraextra <- read.table(text = as.character(logfiles$Video), sep = "_")
+logfiles$gender <- extraextra$V1
+logfiles$position <- extraextra$V4
+logfiles$ostension <- extraextra$V5
+
+# Make sure variables are of the right type
+Fixations <- Fixations %>%
+  mutate(
+    ParticipantID = as.factor(ParticipantID),
+    Year = as.factor(Year),
+    Task = as.factor(Task),
+    ParticipantGender = as.factor(ParticipantGender),
+    Item = as.factor(Item)
+    #StartTime_scaled = scale(StartTime), #might help the model converge
+    #StartTime_norm = normalize(StartTime, method = "standardize", margin = 1L)
+  )
+
+Saccades <- Saccades %>%
+  mutate(
+    ParticipantID = as.factor(ParticipantID),
+    Direction = as.factor(Direction),
+    Year = as.factor(Year),
+    Task = as.factor(Task),
+    ParticipantGender = as.factor(ParticipantGender),
+    Item = as.factor(Item)
+    #StartTime = scale(StartTime) #might help the model converge
+  )
+
+fixations2018 <- filter(Fixations, Year == "2018")
+saccades2018 <- filter(Saccades, Year == "2018")
+
+full_fix <- merge(fixations2018, logfiles)
+full_sac <- merge(saccades2018, logfiles)
+
+fixations_vs <- filter(Fixations, Fixations$Task != "SocialEngagement" & Fixations$StartTime <= 20000 & Fixations$ParticipantID != "2018-1_1_f1")
+
+fixations_vs <- fixations_vs %>%
+  group_by(Trial, ParticipantID) %>%
+  filter(Fixation != max(Fixation))
+
+saccades_vs <- filter(Saccades, Saccades$Task != "SocialEngagement" & Saccades$Blink == "FALSE" & Saccades$StartTime <= 20000 & Saccades$ParticipantID != "2018-1_1_f1")
+
+fixations_vs$StartTime_scaled <- scale(fixations_vs$StartTime)
+saccades_vs$StartTime_scaled <- scale(saccades_vs$StartTime)
+
+fixations_se <- filter(full_fix, full_fix$Task == "SocialEngagement" & full_fix$ParticipantID != "2018-4_1_F" & full_fix$StartTime <= 5000)
+saccades_se <- filter(full_sac, full_sac$Task == "SocialEngagement" & full_sac$Blink == "FALSE" & full_sac$ParticipantID != "2018-4_1_F" & full_sac$StartTime <= 5000)
+
+fixations_se$StartTime_scaled <- scale(fixations_se$StartTime)
+saccades_se$StartTime_scaled <- scale(saccades_se$StartTime)
+
+
+```
+
+### Counting participant distributions etc.
+```{r}  
+fixations_vs %>%
+  group_by(ParticipantID, ParticipantGender) %>%
+  #unique(ParticipantID) %>%
+  #filter(is.na(ParticipantGender)) %>%
+  summarise(n())
+
+fixations_vs %>%
+  group_by(ParticipantID, Year) %>%
+  #unique(ParticipantID) %>%
+  #filter(is.na(ParticipantGender)) %>%
+  summarise(n())
+
+# 8 female, 4 male, 6 from each year
+
+fixations_se %>%
+  group_by(ParticipantID, ParticipantGender) %>%
+  #unique(ParticipantID) %>%
+  #filter(is.na(ParticipantGender)) %>%
+  summarise(n())
+
+fixations_se %>%
+  group_by(ParticipantID, Year) %>%
+  #unique(ParticipantID) %>%
+  #filter(is.na(ParticipantGender)) %>%
+  summarise(n())
+
+# 7 female, 5 male, 6 from each year
+
+fixations_vs %>%
+  group_by(Item, Task) %>%
+  #unique(ParticipantID) %>%
+  #filter(is.na(ParticipantGender)) %>%
+  summarise(n())
+
+# All items are represented in both tasks
+
+fixations_vs %>%
+  group_by(ParticipantID, Trial) %>%
+  #unique(ParticipantID) %>%
+  #filter(is.na(ParticipantGender)) %>%
+  summarise(n())
+
+fixations_se %>%
+  group_by(ParticipantID, Trial) %>%
+  #unique(ParticipantID) %>%
+  #filter(is.na(ParticipantGender)) %>%
+  summarise(n())
+
+fixations_vs %>%
+  group_by(ParticipantID) %>%
+  filter(StartTime > 20000) %>%
+  summarise(n())
+
+fixations_vs %>%
+  group_by(Task) %>%
+  summarise(max(Duration))
+
+fixations_vs %>%
+  group_by(ParticipantID, Task) %>%
+  summarise(max(Duration))
+
+fixations_se %>%
+  group_by(ParticipantID) %>%
+  summarise(sum(StartTime))
+
+```
+
+
+
+
+VISUAL SEARCH
+---
+
+### Visual Search, Fixations
+```{r}
+#From class v1
+fix_model_vs5 <- glmer(Duration ~ Task + StartTime_scaled + (1 + Task | Item) + (1 + Task + StartTime_scaled | ParticipantID), family = gaussian(link = log), fixations_vs, REML = F)
+
+#From class v2
+fix_model_vs6 <- glmer(Duration ~ Task * StartTime_scaled + (1 + Task + StartTime_scaled | Item) + (1 | ParticipantID) + (0 + Task | ParticipantID), family = gaussian(link = log), fixations_vs, REML = F)
+
+#Task * Time
+fix_model_vs1 <- glmer(Duration ~ Task * StartTime_scaled + (1 + Task|Item) + (1 + Task|ParticipantID), family = gaussian(link = log), fixations_vs, REML = F)
+
+#Item * Time
+fix_model_vs2 <- glmer(Duration ~ Item * StartTime_scaled + (1 + Task|ParticipantID), family = gaussian(link = log), fixations_vs, REML = F)
+
+#Item * Task
+fix_model_vs3 <- glmer(Duration ~ Item * Task + (1 + Task|ParticipantID), family = gaussian(link = log), fixations_vs, REML = F)
+
+#Task 
+fix_model_vs5 <- glmer(Duration ~ Task + (1 + Task|Item) + (1 + Task|ParticipantID), family = gaussian(link = log), fixations_vs, REML = F)
+
+#Item
+fix_model_vs6 <- glmer(Duration ~ Item + (1 |ParticipantID), family = gaussian(link = log), fixations_vs, REML = F)
+
+#Task + Time
+fix_model_vs8 <- glmer(Duration ~ Task + StartTime_scaled + (1 + Task|Item) + (1 + Task|ParticipantID), family = gaussian(link = log), fixations_vs, REML = F)
+
+
+fix_model_vs9 <- glmer(Duration ~ Item * StartTime_scaled + Task + (1 + Task|ParticipantID), family = gaussian(link = log), fixations_vs, REML = F)
+
+
+summary(fix_model_vs1)   #interaction not significant
+summary(fix_model_vs2)   #no significant interactions                     (no significant anova from 7)
+summary(fix_model_vs3)   #no significant interactions
+summary(fix_model_vs4)   #one significant item                            (close to 7)
+summary(fix_model_vs5)   #significant
+summary(fix_model_vs6)   #5 significant items
+summary(fix_model_vs7)   #4 significant items, significant start time     *
+summary(fix_model_vs8)   #significant
+summary(fix_model_vs9)   #no significant interactions                     (*better than 7)
+#summary(fix_model_vs10) 
+#summary(fix_model_vs11) 
+
+### Great models, no longer converge ;-(
+model_fav <- glmer(Duration ~ Item + StartTime_scaled + Task + (1|ParticipantID), family = gaussian(link = log), fixations_vs, REML = F)
+model_both <- glmer(Duration ~ Item + Task + (1|ParticipantID), family = gaussian(link = log), fixations_vs, REML = F)
+
+summary(model_fav)
+summary(model_both)
+
+### Final two models
+model_time <- glmer(Duration ~ Item + StartTime_scaled + (1|ParticipantID), family = gaussian(link = log), fixations_vs, REML = F)
+model_task <- glmer(Duration ~ Task + StartTime_scaled + (1|ParticipantID), family = gaussian(link = log), fixations_vs, REML = F)
+
+summary(model_time)
+summary(model_task)
+
+anova(model_task, model_time) 
+
+```
+
+
+### Visual Search, Saccades
+```{r}  
+sac_model_vs <- glmer(Amplitude ~ Task * StartTime + (1 + Task|Item) + (1 + Task|ParticipantID), family = gaussian(link = log), saccades_vs, REML = F)
+
+summary(sac_model_vs)
+```
+
+
+
+
+SOCIAL ENGANGEMENT
+---
+
+
+
+
+### Social Engagement, Fixations
+```{r} 
+
+#Tested models
+pup_1 <- glmer(PupilSize ~ ostension * position + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
+
+pup_2 <- glmer(PupilSize ~ ostension * position + StartTime_scaled + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
+
+pup_3 <- glmer(PupilSize ~ ostension * position + ParticipantGender * gender + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
+
+pup_4 <- glmer(PupilSize ~ ostension + position + ParticipantGender * gender + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
+
+pup_5 <- glmer(PupilSize ~ ParticipantGender * gender + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
+
+pup_6 <- glmer(PupilSize ~ position + ParticipantGender * gender + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
+
+pup_7 <- glmer(PupilSize ~ ostension + position + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
+
+### Final selected model
+pup_8 <- glmer(PupilSize ~ ParticipantGender * gender + position + StartTime_scaled + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
+
+fixations_se$position_r = relevel(fixations_se$position, ref="div")
+fixations_se$ParticipantGender_r = relevel(fixations_se$ParticipantGender, ref="Male")
+#fixations_se$gender_r = relevel(fixations_se$gender, ref="m")
+
+pup_9 <- glmer(PupilSize ~ ParticipantGender_r * gender * position_r * ostension + StartTime_scaled + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
+
+
+anova(pup_9, pup_3)
+
+summary(pup_1) #significantly worse than 2            significant position
+summary(pup_2) #significantly better than 1           significant time, insignificant interaction
+summary(pup_3) #same as 2, same as 8                  significant gender interaction
+summary(pup_4) #same as 2, worse than 8               significant interaction, significant position
+summary(pup_5) #significantly worse than 2            significant interaction
+summary(pup_6) #significantly worse than 2            significant interaction, significant position
+summary(pup_7) #significantly worse than 2            significant position
+summary(pup_8) #significantly better than 2+4         significant interaction, position and time
+summary(pup_9) #significantly better than 3+8         significant four-way interaction...
+
+```
+
+
+```{r}
+
+dur_1 <- glmer(Duration ~ ostension * position + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
+dur_2 <- glmer(Duration ~ ostension + position + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
+dur_3 <- glmer(Duration ~ ostension * StartTime_scaled + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
+dur_4 <- glmer(Duration ~ position * StartTime_scaled + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
+dur_5 <- glmer(Duration ~ ParticipantGender + StartTime_scaled + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
+
+summary(dur_1) #not significant at all
+summary(dur_2) #not significant at all
+summary(dur_3) #everything sucks and I'm dying, need bigger sample size baby
+summary(dur_4) #everything sucks and I'm dying, need bigger sample size baby
+summary(dur_5) #everything sucks and I'm dying, need bigger sample size baby
+
+```
+
+
+```{r}
+ggplot(fixations_se,
+aes(StartTime,PupilSize,colour=ParticipantGender)) +
+geom_smooth() + facet_wrap(~gender)
+#theme_classic()
+
+ggplot(fixations_se,
+aes(StartTime,PupilSize,colour=gender)) +
+geom_smooth() + facet_wrap(~ParticipantGender)
+``` 
+
+
+
+
+
+
+
+
+
