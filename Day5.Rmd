@@ -8,21 +8,20 @@ output:
     highlight: zenburn
 ---
 
-```{r libraries}
-library(tidyverse)
-install.packages("lme4")
-library(lme4)
+```{r libraries} 
 library(pacman)
-p_load(desc, BBmisc)
+p_load(tidyverse, desc, BBmisc, lme4, cvms, Metrics, RTextTools, purrr, caret)
 #detach(package:plyr)
 #library(dplyr)
+
+install.packages("devtools") 
+devtools::install_github("LudvigOlsen/groupdata2")
 ```
 
 DATA LOADING AND CLEANING
----
 
-### Load data
-```{r load data}
+LOAD DATA
+```{r load data} 
 ## Set working directory to the relevant one on your computer
 setwd(getwd())
 
@@ -84,7 +83,7 @@ saccades_se$StartTime_scaled <- scale(saccades_se$StartTime)
 
 ```
 
-### Counting participant distributions etc.
+Counting participant distributions etc.
 ```{r}  
 fixations_vs %>%
   group_by(ParticipantID, ParticipantGender) %>%
@@ -157,10 +156,9 @@ fixations_se %>%
 
 
 VISUAL SEARCH
----
 
-### Visual Search, Fixations
-```{r}
+Visual Search, Fixations
+```{r} 
 #From class v1
 fix_model_vs5 <- glmer(Duration ~ Task + StartTime_scaled + (1 + Task | Item) + (1 + Task + StartTime_scaled | ParticipantID), family = gaussian(link = log), fixations_vs, REML = F)
 
@@ -224,10 +222,8 @@ r.squaredGLMM(model_task)
 ```
 
 
-# Cross validation, VS fixations
-```{r}
-p_load(cvms, groupdata2, Metrics, RTextTools, purrr, caret)
-
+Cross validation, VS fixations
+```{r}  
 data <- fold(fixations_vs, k = 5, id_col = 'ParticipantID') %>% 
   arrange(.folds)
 
@@ -255,16 +251,31 @@ sd(fixations_vs$Duration)
 ```
 
 
-### Visual Search, Saccades
-```{r}   
+Visual Search, Saccades
+```{r}    
 sac_model_vs <- glmer(Amplitude ~ Task * StartTime + (1 + Task|Item) + (1 + Task|ParticipantID), family = gaussian(link = log), saccades_vs, REML = F)
 
 summary(sac_model_vs) 
 ```
 
 
-# Plots
-```{r wow all gathered}
+```{r + CV (sac)} 
+data <- fold(saccades_vs, k = 5,
+             id_col = 'ParticipantID') %>% arrange(.folds)
+# To specify models
+models <- (c("Amplitude ~ Task*StartTimeS + (1 + Task | Item) + (1 + Task | ParticipantID)", "Amplitude ~ Task + StartTimeS + (1 + Task | Item) + (1 + Task | ParticipantID)"))
+  
+# To crossvalidate
+CV_sac <- cross_validate(data, 
+                         models, 
+                         folds_col = '.folds',
+                         family = 'gaussian',
+                         REML = FALSE)
+CV_sac
+```
+
+Plots
+```{r wow all gathered} 
 fixations_vs %>% 
   ggplot() +
   aes(x = StartTime, color = Task, y = Duration ) +
@@ -457,13 +468,9 @@ ggplot(x, aes(x = PositionX, y = 1081-PositionY)) +
 
 
 SOCIAL ENGANGEMENT
----
 
-
-
-### Social Engagement, Fixations
-```{r} 
-
+Social Engagement, Fixations
+```{r}  
 #Tested models
 pup_1 <- glmer(PupilSize ~ ostension * position + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
 
@@ -504,6 +511,29 @@ summary(pup_9) #significantly better than 3+8         significant four-way inter
 ```
 
 
+```{r + Cross Validation 2 fold} 
+#MuMIn::r.squaredGLMM(pup_8)
+#             R2m       R2c
+# [1,] 1.71602e-07 0.1154295
+cv_se <- fold(fixations_se, k = 2,
+                cat_col = c("ParticipantGender", 'Position', 'Gender'), 
+             id_col = 'ParticipantID') %>% 
+  arrange(.folds)
+
+# To specify models
+fixation_models <- (c('PupilSize ~ Ostension * Position + StartTimeS + (1 | ParticipantID)', 'PupilSize ~ ParticipantGender * Gender + Position + StartTimeS + (1 | ParticipantID)', 'PupilSize ~ ParticipantGender * Gender * Position * Ostension + StartTimeS + (1 | ParticipantID)'))
+  
+# To crossvalidate
+CV_fix2018 <- cross_validate(cv_se, 
+                         fixation_models, 
+                         folds_col = '.folds',
+                         family = 'gaussian',
+                         
+                         REML = FALSE)
+CV_fix2018
+```
+
+
 ```{r}
 
 dur_1 <- glmer(Duration ~ ostension * position + (1 | ParticipantID), family = gaussian(link = log), fixations_se, REML = F)
@@ -534,7 +564,7 @@ geom_smooth() + facet_wrap(~ParticipantGender)
 
 
 OSTENSION / FIXATION PLOT ACCORDING TO GENDER
-```{r}
+```{r} 
 fixations_se %>% 
   group_by(ParticipantGender, gender, position, ostension) %>% 
   summarise(PupilMean = mean(PupilSize)) -> puppy
